@@ -293,6 +293,7 @@ def ingest_graphql(collection, state, full=False):
         log(f'Page {page}: {len(nodes)} fetched, {added} new. Cursor: {end_cursor[:20]}...')
 
         # Save cursor after each page so we can resume
+        cursor = end_cursor  # advance to next page
         state['last_cursor'] = end_cursor
         state['total_ingested'] = state.get('total_ingested', 0) + added
         save_state(state)
