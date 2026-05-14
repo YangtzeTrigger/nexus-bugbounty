@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -53,40 +54,23 @@ BATCH_SIZE    = 100   # reports per GraphQL page (H1 max)
 
 # ─── GraphQL Query ────────────────────────────────────────────────────────────
 
-HACKTIVITY_QUERY = """
-query HacktivityFeed($count: Int!, $cursor: String!) {
-  hacktivity_items(
-    first: $count
-    after: $cursor
-    where: {
-      report: {
-        disclosed_at: { _is_null: false }
-      }
-    }
-    order_by: { field: latest_disclosable_activity_at, direction: DESC }
-  ) {
-    total_count
+REPORTS_QUERY = """
+query ReportsFeed($count: Int!, $cursor: String!) {
+  reports(first: $count, after: $cursor) {
     pageInfo {
       hasNextPage
       endCursor
     }
     nodes {
-      ... on HackerPublished {
-        HackerPublished: report {
-          _id
-          title
-          summaries { content }
-          severity { rating score }
-          disclosed_at
-          weakness { name external_id }
-          structured_scope {
-            asset_type
-            asset_identifier
-          }
-        }
-        votes { total_count }
-        team { handle name }
-      }
+      id
+      title
+      disclosed_at
+      severity { rating score }
+      weakness { name external_id }
+      team { handle name }
+      structured_scope { asset_type asset_identifier }
+      summaries { content }
+      votes { total_count }
     }
   }
 }
@@ -138,25 +122,30 @@ def get_collection():
 # ─── Normalisation ────────────────────────────────────────────────────────────
 
 def normalise_graphql_node(node):
-    """Convert a GraphQL HackerPublished node to a flat document."""
-    report = node.get('HackerPublished', {}) or {}
+    """Convert a reports query node to a flat document."""
+    # Decode base64 global ID to numeric report ID
+    raw_id = node.get('id', '')
+    try:
+        rid = base64.b64decode(raw_id).decode().split('/')[-1]
+    except Exception:
+        rid = raw_id
+
     team   = node.get('team', {}) or {}
     votes  = (node.get('votes') or {}).get('total_count', 0)
 
-    rid      = str(report.get('_id', ''))
-    title    = report.get('title', '')
-    severity = (report.get('severity') or {}).get('rating', 'unknown')
-    score    = (report.get('severity') or {}).get('score', None)
-    weakness = (report.get('weakness') or {}).get('name', '')
-    cwe_id   = (report.get('weakness') or {}).get('external_id', '')
-    scope    = report.get('structured_scope') or {}
+    title    = node.get('title', '')
+    severity = (node.get('severity') or {}).get('rating', 'unknown')
+    score    = (node.get('severity') or {}).get('score', None)
+    weakness = (node.get('weakness') or {}).get('name', '')
+    cwe_id   = (node.get('weakness') or {}).get('external_id', '')
+    scope    = node.get('structured_scope') or {}
     asset_type  = (scope.get('asset_type') or 'unknown').lower()
     asset_id    = scope.get('asset_identifier', '')
-    disclosed   = report.get('disclosed_at', '')
+    disclosed   = node.get('disclosed_at', '')
     program     = team.get('handle', '')
 
     # Extract summary text
-    summaries = report.get('summaries') or []
+    summaries = node.get('summaries') or []
     summary   = ' '.join(s.get('content', '') for s in summaries if s.get('content'))
 
     # Build searchable document
@@ -246,7 +235,7 @@ def ingest_graphql(collection, state, full=False):
 
     while True:
         payload = {
-            'query': HACKTIVITY_QUERY,
+            'query': REPORTS_QUERY,
             'variables': {'count': BATCH_SIZE, 'cursor': cursor},
         }
         data = None
@@ -274,7 +263,7 @@ def ingest_graphql(collection, state, full=False):
             log('GraphQL: all retries exhausted — stopping.')
             break
 
-        items = data.get('data', {}).get('hacktivity_items', {})
+        items = data.get('data', {}).get('reports', {})
         nodes = items.get('nodes', [])
         page_info = items.get('pageInfo', {})
         has_next  = page_info.get('hasNextPage', False)
