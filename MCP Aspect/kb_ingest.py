@@ -20,6 +20,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -248,17 +249,29 @@ def ingest_graphql(collection, state, full=False):
             'query': HACKTIVITY_QUERY,
             'variables': {'count': BATCH_SIZE, 'cursor': cursor},
         }
-        try:
-            resp = requests.post(
-                H1_GRAPHQL,
-                json=payload,
-                headers={'Content-Type': 'application/json', 'User-Agent': 'HackerKB-Ingest/1.0'},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            log(f'GraphQL request failed: {e}')
+        data = None
+        for attempt in range(4):
+            try:
+                resp = requests.post(
+                    H1_GRAPHQL,
+                    json=payload,
+                    headers={'Content-Type': 'application/json', 'User-Agent': 'HackerKB-Ingest/1.0'},
+                    timeout=30,
+                )
+                if resp.status_code == 429:
+                    wait = 60 * (2 ** attempt)
+                    log(f'GraphQL 429 rate-limited — waiting {wait}s (attempt {attempt + 1}/4)')
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except Exception as e:
+                log(f'GraphQL request failed (attempt {attempt + 1}): {e}')
+                if attempt < 3:
+                    time.sleep(30)
+        if data is None:
+            log('GraphQL: all retries exhausted — stopping.')
             break
 
         items = data.get('data', {}).get('hacktivity_items', {})
@@ -382,35 +395,29 @@ def ingest_github_seed(collection, state):
         log(f'GitHub fetch failed: {e}')
         return 0
 
-    lines = content.splitlines()
+    # Current format: "1. [Title](https://hackerone.com/reports/ID) to Program - N upvotes, $B"
+    ENTRY_RE = re.compile(
+        r'^\d+\.\s+\[([^\]]+)\]\((https://hackerone\.com/reports/(\d+))\)\s+to\s+(.+?)\s+-\s+(\d+)\s+upvotes,\s+\$[\d,]+',
+        re.IGNORECASE,
+    )
+
     ids, docs, metas = [], [], []
 
-    for line in lines:
+    for line in content.splitlines():
         line = line.strip()
-        if not line.startswith('·') and not line.startswith('*'):
+        m = ENTRY_RE.match(line)
+        if not m:
             continue
-
-        # Parse lines like: "· Title to Program - X upvotes, $Y"
         try:
-            line = line.lstrip('·').lstrip('*').strip()
-            if ' to ' not in line:
-                continue
-            parts = line.split(' to ', 1)
-            title = parts[0].strip()
-            rest  = parts[1] if len(parts) > 1 else ''
-            program = rest.split(' - ')[0].strip() if ' - ' in rest else rest.split(' ')[0]
-
-            # Extract bounty
-            bounty_str = ''
-            if '$' in rest:
-                bounty_str = rest.split('$')[-1].split()[0].replace(',', '')
-
-            # Generate stable ID from title
-            import hashlib
-            rid = 'gh_' + hashlib.md5(title.encode()).hexdigest()[:12]
+            title   = m.group(1).strip()
+            url     = m.group(2)
+            rid     = m.group(3)          # real HackerOne report ID from URL
+            program = m.group(4).strip()
+            votes   = int(m.group(5))
 
             doc = f"""TITLE: {title}
 PROGRAM: {program}
+URL: {url}
 SOURCE: GitHub archive (reddelexc/hackerone-reports)"""
 
             meta = {
@@ -424,8 +431,8 @@ SOURCE: GitHub archive (reddelexc/hackerone-reports)"""
                 'asset_id':   '',
                 'program':    program[:100],
                 'disclosed':  '',
-                'votes':      0,
-                'url':        '',
+                'votes':      votes,
+                'url':        url,
                 'source':     'github_seed',
             }
 
