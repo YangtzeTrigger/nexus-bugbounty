@@ -133,16 +133,16 @@ def normalise_graphql_node(node):
     team   = node.get('team', {}) or {}
     votes  = (node.get('votes') or {}).get('total_count', 0)
 
-    title    = node.get('title', '')
+    title    = node.get('title') or ''
     severity = (node.get('severity') or {}).get('rating', 'unknown')
     score    = (node.get('severity') or {}).get('score', None)
-    weakness = (node.get('weakness') or {}).get('name', '')
-    cwe_id   = (node.get('weakness') or {}).get('external_id', '')
+    weakness = (node.get('weakness') or {}).get('name') or ''
+    cwe_id   = (node.get('weakness') or {}).get('external_id') or ''
     scope    = node.get('structured_scope') or {}
     asset_type  = (scope.get('asset_type') or 'unknown').lower()
-    asset_id    = scope.get('asset_identifier', '')
-    disclosed   = node.get('disclosed_at', '')
-    program     = team.get('handle', '')
+    asset_id    = scope.get('asset_identifier') or ''
+    disclosed   = node.get('disclosed_at') or ''
+    program     = team.get('handle') or ''
 
     # Extract summary text
     summaries = node.get('summaries') or []
