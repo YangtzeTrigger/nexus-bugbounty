@@ -1,0 +1,9 @@
+# requirements-kb.txt
+# Hacker Knowledge Base — Python dependencies
+# Install on Elysium: pip install -r requirements-kb.txt --break-system-packages
+
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+requests>=2.31.0
+tqdm>=4.66.0
+mcp>=1.0.0

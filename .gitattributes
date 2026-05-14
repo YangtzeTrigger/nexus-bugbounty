@@ -1,0 +1,14 @@
+# Ensure shell scripts and Python files keep LF line endings on all platforms
+# (these run on Elysium/Linux — CRLF would break them)
+*.sh   text eol=lf
+*.py   text eol=lf
+
+# JS/JSX/MD/txt — normalise to LF, convert on checkout per platform
+*.js   text eol=lf
+*.jsx  text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+
+# Binary files — no line ending conversion
+*.docx binary
+*.zip  binary
